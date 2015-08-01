@@ -6,9 +6,15 @@
     :license: see LICENSE for details.
 """
 from trytond.pool import Pool
+from carrier import Carrier
+from checkout import Checkout
+from sale import Sale
 
 
 def register():
     Pool.register(
+        Checkout,
+        Carrier,
+        Sale,
         module='nereid_shipping', type_='model'
     )

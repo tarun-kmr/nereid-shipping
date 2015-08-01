@@ -82,7 +82,9 @@ minor_version = int(minor_version)
 
 requires = []
 
-MODULE2PREFIX = {}
+MODULE2PREFIX = {
+    'shipping': 'fio',
+}
 
 MODULE = "nereid_shipping"
 PREFIX = "fio"
@@ -139,6 +141,11 @@ setup(
     """ % (MODULE, MODULE),
     test_suite='tests',
     test_loader='trytond.test_loader:Loader',
+    tests_require=[
+        'pycountry',
+        'mock',
+        'fio_shipping_ups>=3.4,<3.5',
+    ],
     cmdclass={
         'test': SQLiteTest,
         'test_on_postgres': PostgresTest,
