@@ -12,7 +12,8 @@ from trytond.pool import Pool, PoolMeta
 from trytond.exceptions import UserError
 from trytond.modules.nereid_checkout.checkout import not_empty_cart, \
     sale_has_non_guest_party
-from nereid import route, redirect, url_for, render_template, request, flash
+from nereid import route, redirect, url_for, render_template, \
+    request, flash, current_website
 
 __metaclass__ = PoolMeta
 __all__ = ['Checkout']
@@ -38,9 +39,7 @@ class Checkout:
         Carrier = Pool().get('carrier')
         CarrierService = Pool().get('carrier.service')
         Currency = Pool().get('currency.currency')
-
         cart_sale = NereidCart.open_cart().sale
-
         if not cart_sale.shipment_address:
             return redirect(url_for('nereid.checkout.shipping_address'))
 
@@ -62,7 +61,7 @@ class Checkout:
         delivery_rates = []
         try:
             delivery_rates = cart_sale.get_shipping_rates(
-                request.nereid_website.carriers,
+                current_website.carriers,
                 silent=True
             )
         except UserError, e:
