@@ -144,7 +144,8 @@ setup(
     tests_require=[
         'pycountry',
         'mock',
-        'fio_shipping_ups>=3.4,<3.5',
+        'fio_shipping_ups>=4.0,<4.1',
+        'trytond_product_measurements'
     ],
     cmdclass={
         'test': SQLiteTest,
