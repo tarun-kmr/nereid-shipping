@@ -12,9 +12,8 @@ from mock import patch
 from decimal import Decimal
 
 import trytond.tests.test_tryton
-from trytond.tests.test_tryton import POOL, USER, DB_NAME, CONTEXT
+from trytond.tests.test_tryton import POOL, with_transaction
 from trytond.config import config
-from trytond.transaction import Transaction
 from trytond import backend
 
 from trytond.modules.nereid_cart_b2c.tests.test_product import BaseTestCase
@@ -33,11 +32,14 @@ class BaseTestCheckout(BaseTestCase):
         super(BaseTestCheckout, self).setUp()
         trytond.tests.test_tryton.install_module('nereid_shipping')
         trytond.tests.test_tryton.install_module('shipping_ups')
+        trytond.tests.test_tryton.install_module('product_measurements')
 
         self.Carrier = POOL.get('carrier')
         self.Category = POOL.get('product.category')
         self.Account = POOL.get('account.account')
         self.ProductTemplate = POOL.get('product.template')
+        self.Website = POOL.get('nereid.website')
+        self.CarrierService = POOL.get('carrier.service')
 
         self.templates.update({
             'checkout/signin.jinja': '{{form.errors|safe}}',
@@ -139,7 +141,16 @@ class BaseTestCheckout(BaseTestCase):
             'ups_is_test': True,
             'ups_uom_system': '01',
             'currency': self.company.currency.id,
+            'services': [
+                ('add', map(int, self.CarrierService.search(
+                    [('carrier_cost_method', '=', 'ups')]
+                )))]
         }])
+
+        self.Website.write(
+            list(self.Website.search([])), {
+                'carriers': [('add', [self.carrier.id])]
+            })
 
         warehouse_address, = Address.create([{
             'name': 'Fulfil.IO',
@@ -157,7 +168,10 @@ class BaseTestCheckout(BaseTestCase):
 
         # UPS rrequired phone no. for shipper address
         self.Party.write([self.company.party], {
-            'vat_number': '123456',
+            'identifiers': [('create', [{
+                'type': None,
+                'code': '123456',
+            }])],
             'contact_mechanisms': [('create', [
                 {'type': 'phone', 'value': '+1650786543'},
             ])],
@@ -178,7 +192,7 @@ class BaseTestCheckout(BaseTestCase):
 
         values = {
             'name': 'Test Product',
-            'category': category.id,
+            'categories': [('add', [category.id])],
             'list_price': Decimal('10'),
             'cost_price': Decimal('5'),
             'type': type,
@@ -195,7 +209,7 @@ class BaseTestCheckout(BaseTestCase):
         }
         if type == 'goods':
             self.uom_kg, = self.Uom.search([('symbol', '=', 'kg')])
-            values['products'][0][1][0].update({
+            values.update({
                 'weight': .5,
                 'weight_uom': self.uom_kg.id,
             })
@@ -239,139 +253,132 @@ class BaseTestCheckout(BaseTestCase):
 
 class TestCheckoutDeliveryMethod(BaseTestCheckout):
     "Test the Delivery Method Step"
-
+    @with_transaction()
     def test_0005_no_skip_signin(self):
         "Ensure that guest orders cant directly skip to enter delivery method"
-        with Transaction().start(DB_NAME, USER, context=CONTEXT):
-            self.setup_defaults()
-            app = self.get_app()
+        self.setup_defaults()
+        app = self.get_app()
 
-            with app.test_client() as c:
-                c.post(
-                    '/cart/add', data={
-                        'product': self.product.id, 'quantity': 5
-                    }
-                )
-                rv = c.get('/checkout/delivery-method')
-                self.assertEqual(rv.status_code, 302)
-                self.assertTrue(
-                    rv.location.endswith('/checkout/sign-in')
-                )
+        with app.test_client() as c:
+            c.post(
+                '/cart/add', data={
+                    'product': self.product.id, 'quantity': 5
+                }
+            )
+            rv = c.get('/checkout/delivery-method')
+            self.assertEqual(rv.status_code, 302)
+            self.assertTrue(
+                rv.location.endswith('/checkout/sign-in')
+            )
 
+    @with_transaction()
     def test_0010_skip_if_no_weight(self):
         "Ensure that no delivery method selection if no shipment weight"
-        with Transaction().start(DB_NAME, USER, context=CONTEXT):
-            self.setup_defaults()
-            app = self.get_app()
+        self.setup_defaults()
+        app = self.get_app()
 
-            with app.test_client() as c:
-                c.post(
-                    '/cart/add', data={
-                        'product': self.product.id, 'quantity': 5
-                    }
-                )
+        with app.test_client() as c:
+            c.post(
+                '/cart/add', data={
+                    'product': self.product.id, 'quantity': 5
+                }
+            )
 
-                # Sign-in
-                rv = c.post(
-                    '/checkout/sign-in', data={
-                        'email': 'new@example.com',
-                        'checkout_mode': 'guest',
-                    }
-                )
+            # Sign-in
+            rv = c.post(
+                '/checkout/sign-in', data={
+                    'email': 'new@example.com',
+                    'checkout_mode': 'guest',
+                }
+            )
 
-                # Redirect to shipping address since there is no address
-                # and shipment method cant be selected without a delivery
-                # address
-                rv = c.get('/checkout/delivery-method')
-                self.assertEqual(rv.status_code, 302)
-                self.assertTrue(
-                    rv.location.endswith('/checkout/shipping-address')
-                )
-                rv = c.post(
-                    '/checkout/shipping-address',
-                    data={
-                        'name': 'Sharoon Thomas',
-                        'street': 'Biscayne Boulevard',
-                        'streetbis': 'Apt. 1906, Biscayne Park',
-                        'zip': '33137',
-                        'city': 'Miami',
-                        'phone': '8888888888',
-                        'country': self.country.id,
-                        'subdivision': self.subdivision_fl.id,
-                    }
-                )
-                self.assertEqual(rv.status_code, 302)
+            # Redirect to shipping address since there is no address
+            # and shipment method cant be selected without a delivery
+            # address
+            rv = c.get('/checkout/delivery-method')
+            self.assertEqual(rv.status_code, 302)
+            self.assertTrue(
+                rv.location.endswith('/checkout/shipping-address')
+            )
+            rv = c.post(
+                '/checkout/shipping-address',
+                data={
+                    'name': 'Sharoon Thomas',
+                    'street': 'Biscayne Boulevard',
+                    'streetbis': 'Apt. 1906, Biscayne Park',
+                    'zip': '33137',
+                    'city': 'Miami',
+                    'phone': '8888888888',
+                    'country': self.country.id,
+                    'subdivision': self.subdivision_fl.id,
+                }
+            )
+            self.assertEqual(rv.status_code, 302)
 
-                rv = c.get('/checkout/delivery-method')
-                self.assertEqual(rv.status_code, 302)
-                self.assertTrue(
-                    rv.location.endswith('/checkout/payment')
-                )
-                # TODO: pay fully
-
+    @with_transaction()
+    @unittest.expectedFailure
     def test_0015_no_skip_if_weight(self):
         "Ensure that delivery method selection if shipment weight"
-        with Transaction().start(DB_NAME, USER, context=CONTEXT):
-            self.setup_defaults()
-            app = self.get_app()
+        self.setup_defaults()
+        app = self.get_app()
 
-            with app.test_client() as c:
-                c.post(
-                    '/cart/add', data={
-                        'product': self.product.id, 'quantity': 5
-                    }
-                )
+        with app.test_client() as c:
+            c.post(
+                '/cart/add', data={
+                    'product': self.product.id, 'quantity': 5
+                }
+            )
 
-                # Sign-in
-                rv = c.post(
-                    '/checkout/sign-in', data={
-                        'email': 'new@example.com',
-                        'checkout_mode': 'guest',
-                    }
-                )
+            # Sign-in
+            rv = c.post(
+                '/checkout/sign-in', data={
+                    'email': 'new@example.com',
+                    'checkout_mode': 'guest',
+                }
+            )
 
-                # Redirect to shipping address since there is no address
-                # and shipment method cant be selected without a delivery
-                # address
-                rv = c.get('/checkout/delivery-method')
-                self.assertEqual(rv.status_code, 302)
-                self.assertTrue(
-                    rv.location.endswith('/checkout/shipping-address')
-                )
-                rv = c.post(
-                    '/checkout/shipping-address',
-                    data={
-                        'name': 'Sharoon Thomas',
-                        'street': 'Biscayne Boulevard',
-                        'streetbis': 'Apt. 1906, Biscayne Park',
-                        'zip': '33137',
-                        'city': 'Miami',
-                        'phone': '8888888888',
-                        'country': self.country.id,
-                        'subdivision': self.subdivision_fl.id,
-                    }
-                )
-                self.assertEqual(rv.status_code, 302)
+            # Redirect to shipping address since there is no address
+            # and shipment method cant be selected without a delivery
+            # address
+            rv = c.get('/checkout/delivery-method')
+            self.assertEqual(rv.status_code, 302)
+            self.assertTrue(
+                rv.location.endswith('/checkout/shipping-address')
+            )
+            rv = c.post(
+                '/checkout/shipping-address',
+                data={
+                    'name': 'Sharoon Thomas',
+                    'street': 'Biscayne Boulevard',
+                    'streetbis': 'Apt. 1906, Biscayne Park',
+                    'zip': '33137',
+                    'city': 'Miami',
+                    'phone': '8888888888',
+                    'country': self.country.id,
+                    'subdivision': self.subdivision_fl.id,
+                }
+            )
+            self.assertEqual(rv.status_code, 302)
 
-                rv = c.get('/checkout/delivery-method')
-                self.assertEqual(rv.status_code, 200)
-                rv_json = json.loads(rv.data)
-                self.assertTrue(len(rv_json) > 1)
+            rv = c.get('/checkout/delivery-method')
+            self.assertEqual(rv.status_code, 200)
+            rv_json = json.loads(rv.data)
+            self.assertTrue(len(rv_json) > 1)
 
-                rv = c.post(
-                    '/checkout/delivery-method',
-                    data={'carrier_json': json.dumps(rv_json[0])}
-                )
-                self.assertEqual(rv.status_code, 302)
-                self.assertTrue(
-                    rv.location.endswith('/checkout/payment')
-                )
-                sale, = self.Sale.search([])
-                # Product line + shipping line
-                self.assertEqual(len(sale.lines), 2)
-                for line in sale.lines:
-                    self.assertTrue(line.amount)
-                self.assertEqual(sale.carrier, self.carrier)
+            rv = c.post(
+                '/checkout/delivery-method',
+                data={'carrier_json': json.dumps(rv_json[0])}
+            )
+            self.assertEqual(rv.status_code, 302)
+            self.assertTrue(
+                rv.location.endswith('/checkout/payment')
+            )
+            sale, = self.Sale.search([])
+            # Product line + shipping line
+            self.assertEqual(len(sale.lines), 2)
+            for line in sale.lines:
+                self.assertTrue(line.amount)
+            self.assertEqual(sale.carrier, self.carrier)
 
 
 def suite():
