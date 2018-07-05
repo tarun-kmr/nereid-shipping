@@ -14,9 +14,32 @@ from trytond.modules.nereid_checkout.checkout import not_empty_cart, \
     sale_has_non_guest_party
 from nereid import route, redirect, url_for, render_template, \
     request, flash, current_website
+from trytond.modules.nereid_checkout.signals import cart_address_updated
+from trytond.modules.nereid_cart_b2c.signals import cart_updated
+
 
 __metaclass__ = PoolMeta
-__all__ = ['Checkout']
+__all__ = ['Checkout', 'Cart']
+
+
+class Cart:
+    __name__ = 'nereid.cart'
+
+    @cart_address_updated.connect
+    @cart_updated.connect
+    def delete_shipping_line(self):
+        """
+        Deleting shipping lines whenever the cart or addresss is being updated
+        """
+        SaleLine = Pool().get('sale.line')
+
+        if not self.sale:
+            return
+
+        for line in self.sale.lines:
+            if not line.shipment_cost:
+                continue
+            SaleLine.delete([line])
 
 
 class Checkout:

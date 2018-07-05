@@ -6,12 +6,13 @@
     :license: see LICENSE for details.
 """
 from trytond.pool import Pool
-from checkout import Checkout
+from checkout import Checkout, Cart
 from website import Website, WebsiteCarrier
 
 
 def register():
     Pool.register(
+        Cart,
         Checkout,
         Website,
         WebsiteCarrier,
